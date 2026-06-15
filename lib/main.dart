@@ -38,6 +38,8 @@ class CountdownEvent {
     required this.targetDate,
     required this.category,
     required this.reminder,
+    required this.reminderHour,
+    required this.reminderMinute,
   });
 
   final String id;
@@ -45,6 +47,8 @@ class CountdownEvent {
   final DateTime targetDate;
   final String category;
   final String reminder;
+  final int reminderHour;
+  final int reminderMinute;
 
   Map<String, dynamic> toMap() {
     return {
@@ -53,6 +57,8 @@ class CountdownEvent {
       'targetDate': targetDate.toIso8601String(),
       'category': category,
       'reminder': reminder,
+      'reminderHour': reminderHour,
+      'reminderMinute': reminderMinute,
     };
   }
 
@@ -63,6 +69,8 @@ class CountdownEvent {
       targetDate: DateTime.parse(map['targetDate'] as String),
       category: map['category'] as String,
       reminder: (map['reminder'] as String?) ?? 'none',
+      reminderHour: (map['reminderHour'] as int?) ?? 9,
+      reminderMinute: (map['reminderMinute'] as int?) ?? 0,
     );
   }
 }
@@ -191,7 +199,24 @@ class _EventHomePageState extends State<EventHomePage> {
   DateTime _notificationDate(CountdownEvent event, int offsetDays) {
     final date = DateTime(event.targetDate.year, event.targetDate.month, event.targetDate.day)
         .subtract(Duration(days: offsetDays));
-    return DateTime(date.year, date.month, date.day, 9);
+    return DateTime(date.year, date.month, date.day, event.reminderHour, event.reminderMinute);
+  }
+
+  String _reminderLabel(CountdownEvent event) {
+    if (event.reminder == 'none') {
+      return 'No reminder';
+    }
+    final timeLabel = _formatReminderTime(event.reminderHour, event.reminderMinute);
+    if (event.reminder == 'day_before') {
+      return '1 day before at $timeLabel';
+    }
+    return 'Same day at $timeLabel';
+  }
+
+  String _formatReminderTime(int hour, int minute) {
+    final now = DateTime.now();
+    final value = DateTime(now.year, now.month, now.day, hour, minute);
+    return DateFormat.Hm().format(value);
   }
 
   Future<void> _rescheduleNotifications() async {
@@ -282,6 +307,10 @@ class _EventHomePageState extends State<EventHomePage> {
     var selectedDate = editing?.targetDate ?? DateTime.now().add(const Duration(days: 7));
     var selectedCategory = editing?.category ?? 'Vacation';
     var selectedReminder = editing?.reminder ?? 'none';
+    var selectedReminderTime = TimeOfDay(
+      hour: editing?.reminderHour ?? 9,
+      minute: editing?.reminderMinute ?? 0,
+    );
     final formKey = GlobalKey<FormState>();
 
     await showDialog<void>(
@@ -321,6 +350,7 @@ class _EventHomePageState extends State<EventHomePage> {
                                         Duration(days: template['days'] as int),
                                       );
                                       selectedReminder = 'day_before';
+                                      selectedReminderTime = const TimeOfDay(hour: 9, minute: 0);
                                     });
                                   },
                                 ),
@@ -361,12 +391,37 @@ class _EventHomePageState extends State<EventHomePage> {
                         decoration: const InputDecoration(labelText: 'Reminder'),
                         items: const [
                           DropdownMenuItem(value: 'none', child: Text('No reminder')),
-                          DropdownMenuItem(value: 'day_before', child: Text('1 day before (9:00)')),
-                          DropdownMenuItem(value: 'same_day', child: Text('Same day (9:00)')),
+                          DropdownMenuItem(value: 'day_before', child: Text('1 day before')),
+                          DropdownMenuItem(value: 'same_day', child: Text('Same day')),
                         ],
                         onChanged: (value) {
                           setDialogState(() => selectedReminder = value ?? selectedReminder);
                         },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Reminder time: ${selectedReminderTime.format(context)}',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: selectedReminder == 'none'
+                                ? null
+                                : () async {
+                                    final picked = await showTimePicker(
+                                      context: context,
+                                      initialTime: selectedReminderTime,
+                                    );
+                                    if (picked != null) {
+                                      setDialogState(() => selectedReminderTime = picked);
+                                    }
+                                  },
+                            child: const Text('Change'),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -412,6 +467,8 @@ class _EventHomePageState extends State<EventHomePage> {
                       targetDate: selectedDate,
                       category: selectedCategory,
                       reminder: selectedReminder,
+                      reminderHour: selectedReminderTime.hour,
+                      reminderMinute: selectedReminderTime.minute,
                     );
 
                     setState(() {
@@ -570,6 +627,33 @@ class _EventHomePageState extends State<EventHomePage> {
                                                       .textTheme
                                                       .bodySmall
                                                       ?.copyWith(color: Colors.black54),
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: event.reminder == 'none'
+                                                        ? const Color(0xFFE5E7EB)
+                                                        : const Color(0xFFDBEAFE),
+                                                    borderRadius: BorderRadius.circular(999),
+                                                  ),
+                                                  child: Text(
+                                                    event.reminder == 'none'
+                                                        ? '🔕 No reminder'
+                                                        : '🔔 ${_reminderLabel(event)}',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .labelSmall
+                                                        ?.copyWith(
+                                                          color: event.reminder == 'none'
+                                                              ? const Color(0xFF374151)
+                                                              : const Color(0xFF1D4ED8),
+                                                          fontWeight: FontWeight.w700,
+                                                        ),
+                                                  ),
                                                 ),
                                                 const SizedBox(height: 4),
                                                 Text(
