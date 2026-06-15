@@ -79,6 +79,13 @@ class _EventHomePageState extends State<EventHomePage> {
     {'name': 'Custom', 'emoji': '⭐'},
   ];
 
+  static const List<Map<String, dynamic>> _quickTemplates = [
+    {'label': '🏖️ Vacation', 'title': 'Summer Vacation', 'category': 'Vacation', 'days': 90},
+    {'label': '💍 Wedding', 'title': 'Wedding Day', 'category': 'Wedding', 'days': 120},
+    {'label': '🎂 Birthday', 'title': 'Birthday Party', 'category': 'Birthday', 'days': 30},
+    {'label': '📝 Exam', 'title': 'Final Exam', 'category': 'Exam', 'days': 21},
+  ];
+
   final List<CountdownEvent> _events = [];
   String _activeCategory = 'All';
   String _sortMode = 'Soonest';
@@ -212,58 +219,91 @@ class _EventHomePageState extends State<EventHomePage> {
               title: Text(editing == null ? 'Add Event' : 'Edit Event'),
               content: Form(
                 key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: titleController,
-                      decoration: const InputDecoration(labelText: 'Title'),
-                      validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Title is required';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCategory,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: _categories
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item['name'],
-                              child: Text('${item['emoji']} ${item['name']}'),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setDialogState(() => selectedCategory = value ?? selectedCategory);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text('Date: ${DateFormat.yMMMd().format(selectedDate)}'),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (editing == null) ...[
+                        Text(
+                          'Quick templates',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
-                        TextButton(
-                          onPressed: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              firstDate: DateTime(2000),
-                              lastDate: DateTime(2100),
-                              initialDate: selectedDate,
-                            );
-                            if (picked != null) {
-                              setDialogState(() => selectedDate = picked);
-                            }
-                          },
-                          child: const Text('Change'),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _quickTemplates
+                              .map(
+                                (template) => ActionChip(
+                                  label: Text(template['label'] as String),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      titleController.text = template['title'] as String;
+                                      selectedCategory = template['category'] as String;
+                                      selectedDate = DateTime.now().add(
+                                        Duration(days: template['days'] as int),
+                                      );
+                                    });
+                                  },
+                                ),
+                              )
+                              .toList(growable: false),
                         ),
+                        const SizedBox(height: 12),
                       ],
-                    ),
-                  ],
+                      TextFormField(
+                        controller: titleController,
+                        decoration: const InputDecoration(labelText: 'Title'),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return 'Title is required';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        decoration: const InputDecoration(labelText: 'Category'),
+                        items: _categories
+                            .map(
+                              (item) => DropdownMenuItem(
+                                value: item['name'],
+                                child: Text('${item['emoji']} ${item['name']}'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setDialogState(() => selectedCategory = value ?? selectedCategory);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text('Date: ${DateFormat.yMMMd().format(selectedDate)}'),
+                          ),
+                          TextButton(
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(2100),
+                                initialDate: selectedDate,
+                              );
+                              if (picked != null) {
+                                setDialogState(() => selectedDate = picked);
+                              }
+                            },
+                            child: const Text('Change'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
