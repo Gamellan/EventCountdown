@@ -1,10 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
 void main() {
   runApp(const EventCountdownApp());
@@ -34,12 +37,14 @@ class CountdownEvent {
     required this.title,
     required this.targetDate,
     required this.category,
+    required this.reminder,
   });
 
   final String id;
   final String title;
   final DateTime targetDate;
   final String category;
+  final String reminder;
 
   Map<String, dynamic> toMap() {
     return {
@@ -47,6 +52,7 @@ class CountdownEvent {
       'title': title,
       'targetDate': targetDate.toIso8601String(),
       'category': category,
+      'reminder': reminder,
     };
   }
 
@@ -56,6 +62,7 @@ class CountdownEvent {
       title: map['title'] as String,
       targetDate: DateTime.parse(map['targetDate'] as String),
       category: map['category'] as String,
+      reminder: (map['reminder'] as String?) ?? 'none',
     );
   }
 }
@@ -70,6 +77,10 @@ class EventHomePage extends StatefulWidget {
 class _EventHomePageState extends State<EventHomePage> {
   static const String _eventsKey = 'events_json';
   static const String _widgetProviderName = 'EventCountdownWidgetProvider';
+  static const String _notificationChannelId = 'event_countdown_reminders';
+  static const String _notificationChannelName = 'Event reminders';
+
+  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
 
   static const List<Map<String, String>> _categories = [
     {'name': 'Vacation', 'emoji': '🏖️'},
@@ -124,7 +135,20 @@ class _EventHomePageState extends State<EventHomePage> {
   @override
   void initState() {
     super.initState();
+    _initializeNotifications();
     _loadEvents();
+  }
+
+  Future<void> _initializeNotifications() async {
+    tzdata.initializeTimeZones();
+
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    await _notifications.initialize(const InitializationSettings(android: androidSettings));
+
+    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin
+    >();
+    await androidPlugin?.requestNotificationsPermission();
   }
 
   Future<void> _loadEvents() async {
@@ -157,6 +181,55 @@ class _EventHomePageState extends State<EventHomePage> {
     final raw = jsonEncode(_events.map((e) => e.toMap()).toList(growable: false));
     await prefs.setString(_eventsKey, raw);
     await _updateHomeWidget();
+    await _rescheduleNotifications();
+  }
+
+  int _notificationId(CountdownEvent event, int offsetDays) {
+    return '${event.id}_$offsetDays'.hashCode & 0x7fffffff;
+  }
+
+  DateTime _notificationDate(CountdownEvent event, int offsetDays) {
+    final date = DateTime(event.targetDate.year, event.targetDate.month, event.targetDate.day)
+        .subtract(Duration(days: offsetDays));
+    return DateTime(date.year, date.month, date.day, 9);
+  }
+
+  Future<void> _rescheduleNotifications() async {
+    await _notifications.cancelAll();
+    final now = DateTime.now();
+
+    for (final event in _events) {
+      if (event.reminder == 'none') {
+        continue;
+      }
+
+      final offsetDays = event.reminder == 'day_before' ? 1 : 0;
+      final scheduledAt = _notificationDate(event, offsetDays);
+      if (!scheduledAt.isAfter(now)) {
+        continue;
+      }
+
+      final body = offsetDays == 1
+          ? 'Tomorrow is ${event.title}.'
+          : 'Today is ${event.title}.';
+
+      await _notifications.zonedSchedule(
+        _notificationId(event, offsetDays),
+        'Event Countdown Reminder',
+        body,
+        tz.TZDateTime.from(scheduledAt, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _notificationChannelId,
+            _notificationChannelName,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
   }
 
   Future<void> _updateHomeWidget() async {
@@ -208,6 +281,7 @@ class _EventHomePageState extends State<EventHomePage> {
     final titleController = TextEditingController(text: editing?.title ?? '');
     var selectedDate = editing?.targetDate ?? DateTime.now().add(const Duration(days: 7));
     var selectedCategory = editing?.category ?? 'Vacation';
+    var selectedReminder = editing?.reminder ?? 'none';
     final formKey = GlobalKey<FormState>();
 
     await showDialog<void>(
@@ -246,6 +320,7 @@ class _EventHomePageState extends State<EventHomePage> {
                                       selectedDate = DateTime.now().add(
                                         Duration(days: template['days'] as int),
                                       );
+                                      selectedReminder = 'day_before';
                                     });
                                   },
                                 ),
@@ -278,6 +353,19 @@ class _EventHomePageState extends State<EventHomePage> {
                             .toList(),
                         onChanged: (value) {
                           setDialogState(() => selectedCategory = value ?? selectedCategory);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedReminder,
+                        decoration: const InputDecoration(labelText: 'Reminder'),
+                        items: const [
+                          DropdownMenuItem(value: 'none', child: Text('No reminder')),
+                          DropdownMenuItem(value: 'day_before', child: Text('1 day before (9:00)')),
+                          DropdownMenuItem(value: 'same_day', child: Text('Same day (9:00)')),
+                        ],
+                        onChanged: (value) {
+                          setDialogState(() => selectedReminder = value ?? selectedReminder);
                         },
                       ),
                       const SizedBox(height: 12),
@@ -323,6 +411,7 @@ class _EventHomePageState extends State<EventHomePage> {
                       title: titleController.text.trim(),
                       targetDate: selectedDate,
                       category: selectedCategory,
+                      reminder: selectedReminder,
                     );
 
                     setState(() {
