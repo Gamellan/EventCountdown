@@ -202,15 +202,75 @@ class _EventHomePageState extends State<EventHomePage> {
     return DateTime(date.year, date.month, date.day, event.reminderHour, event.reminderMinute);
   }
 
+  List<int> _reminderOffsetsFromValue(String reminder) {
+    if (reminder == 'none') {
+      return const [];
+    }
+    if (reminder == 'day_before') {
+      return const [1];
+    }
+    if (reminder == 'same_day') {
+      return const [0];
+    }
+    if (!reminder.startsWith('multi:')) {
+      return const [];
+    }
+
+    final values = reminder
+        .substring('multi:'.length)
+        .split(',')
+        .map((value) => int.tryParse(value.trim()))
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.compareTo(a));
+    return values;
+  }
+
+  String _encodeReminderOffsets(Set<int> offsets) {
+    if (offsets.isEmpty) {
+      return 'none';
+    }
+    if (offsets.length == 1) {
+      final only = offsets.first;
+      if (only == 1) {
+        return 'day_before';
+      }
+      if (only == 0) {
+        return 'same_day';
+      }
+    }
+    final sorted = offsets.toList()..sort((a, b) => b.compareTo(a));
+    return 'multi:${sorted.join(',')}';
+  }
+
   String _reminderLabel(CountdownEvent event) {
-    if (event.reminder == 'none') {
+    final offsets = _reminderOffsetsFromValue(event.reminder);
+    if (offsets.isEmpty) {
       return 'No reminder';
     }
+
     final timeLabel = _formatReminderTime(event.reminderHour, event.reminderMinute);
-    if (event.reminder == 'day_before') {
-      return '1 day before at $timeLabel';
+    final parts = offsets.map((offset) {
+      if (offset == 0) {
+        return 'same day';
+      }
+      if (offset == 1) {
+        return '1 day before';
+      }
+      return '$offset days before';
+    }).join(', ');
+    return '$parts at $timeLabel';
+  }
+
+  String _notificationBody(CountdownEvent event, int offsetDays) {
+    if (offsetDays == 0) {
+      return 'Today is ${event.title}.';
     }
-    return 'Same day at $timeLabel';
+    if (offsetDays == 1) {
+      return 'Tomorrow is ${event.title}.';
+    }
+    return '$offsetDays days left for ${event.title}.';
   }
 
   String _formatReminderTime(int hour, int minute) {
@@ -224,36 +284,34 @@ class _EventHomePageState extends State<EventHomePage> {
     final now = DateTime.now();
 
     for (final event in _events) {
-      if (event.reminder == 'none') {
+      final offsets = _reminderOffsetsFromValue(event.reminder);
+      if (offsets.isEmpty) {
         continue;
       }
 
-      final offsetDays = event.reminder == 'day_before' ? 1 : 0;
-      final scheduledAt = _notificationDate(event, offsetDays);
-      if (!scheduledAt.isAfter(now)) {
-        continue;
-      }
+      for (final offsetDays in offsets) {
+        final scheduledAt = _notificationDate(event, offsetDays);
+        if (!scheduledAt.isAfter(now)) {
+          continue;
+        }
 
-      final body = offsetDays == 1
-          ? 'Tomorrow is ${event.title}.'
-          : 'Today is ${event.title}.';
-
-      await _notifications.zonedSchedule(
-        _notificationId(event, offsetDays),
-        'Event Countdown Reminder',
-        body,
-        tz.TZDateTime.from(scheduledAt, tz.local),
-        const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _notificationChannelId,
-            _notificationChannelName,
-            importance: Importance.high,
-            priority: Priority.high,
+        await _notifications.zonedSchedule(
+          _notificationId(event, offsetDays),
+          'Event Countdown Reminder',
+          _notificationBody(event, offsetDays),
+          tz.TZDateTime.from(scheduledAt, tz.local),
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              _notificationChannelId,
+              _notificationChannelName,
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
           ),
-        ),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-      );
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
     }
   }
 
@@ -306,7 +364,7 @@ class _EventHomePageState extends State<EventHomePage> {
     final titleController = TextEditingController(text: editing?.title ?? '');
     var selectedDate = editing?.targetDate ?? DateTime.now().add(const Duration(days: 7));
     var selectedCategory = editing?.category ?? 'Vacation';
-    var selectedReminder = editing?.reminder ?? 'none';
+    var selectedReminderOffsets = _reminderOffsetsFromValue(editing?.reminder ?? 'none').toSet();
     var selectedReminderTime = TimeOfDay(
       hour: editing?.reminderHour ?? 9,
       minute: editing?.reminderMinute ?? 0,
@@ -349,7 +407,7 @@ class _EventHomePageState extends State<EventHomePage> {
                                       selectedDate = DateTime.now().add(
                                         Duration(days: template['days'] as int),
                                       );
-                                      selectedReminder = 'day_before';
+                                      selectedReminderOffsets = {1};
                                       selectedReminderTime = const TimeOfDay(hour: 9, minute: 0);
                                     });
                                   },
@@ -386,17 +444,57 @@ class _EventHomePageState extends State<EventHomePage> {
                         },
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedReminder,
-                        decoration: const InputDecoration(labelText: 'Reminder'),
-                        items: const [
-                          DropdownMenuItem(value: 'none', child: Text('No reminder')),
-                          DropdownMenuItem(value: 'day_before', child: Text('1 day before')),
-                          DropdownMenuItem(value: 'same_day', child: Text('Same day')),
+                      Text(
+                        'Reminders',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilterChip(
+                            label: const Text('7 days before'),
+                            selected: selectedReminderOffsets.contains(7),
+                            onSelected: (enabled) {
+                              setDialogState(() {
+                                if (enabled) {
+                                  selectedReminderOffsets.add(7);
+                                } else {
+                                  selectedReminderOffsets.remove(7);
+                                }
+                              });
+                            },
+                          ),
+                          FilterChip(
+                            label: const Text('1 day before'),
+                            selected: selectedReminderOffsets.contains(1),
+                            onSelected: (enabled) {
+                              setDialogState(() {
+                                if (enabled) {
+                                  selectedReminderOffsets.add(1);
+                                } else {
+                                  selectedReminderOffsets.remove(1);
+                                }
+                              });
+                            },
+                          ),
+                          FilterChip(
+                            label: const Text('Same day'),
+                            selected: selectedReminderOffsets.contains(0),
+                            onSelected: (enabled) {
+                              setDialogState(() {
+                                if (enabled) {
+                                  selectedReminderOffsets.add(0);
+                                } else {
+                                  selectedReminderOffsets.remove(0);
+                                }
+                              });
+                            },
+                          ),
                         ],
-                        onChanged: (value) {
-                          setDialogState(() => selectedReminder = value ?? selectedReminder);
-                        },
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -408,7 +506,7 @@ class _EventHomePageState extends State<EventHomePage> {
                             ),
                           ),
                           TextButton(
-                            onPressed: selectedReminder == 'none'
+                            onPressed: selectedReminderOffsets.isEmpty
                                 ? null
                                 : () async {
                                     final picked = await showTimePicker(
@@ -466,7 +564,7 @@ class _EventHomePageState extends State<EventHomePage> {
                       title: titleController.text.trim(),
                       targetDate: selectedDate,
                       category: selectedCategory,
-                      reminder: selectedReminder,
+                      reminder: _encodeReminderOffsets(selectedReminderOffsets),
                       reminderHour: selectedReminderTime.hour,
                       reminderMinute: selectedReminderTime.minute,
                     );
@@ -583,6 +681,7 @@ class _EventHomePageState extends State<EventHomePage> {
                                 itemBuilder: (context, index) {
                                   final event = visibleEvents[index];
                                   final days = _daysUntil(event.targetDate, now);
+                                  final hasReminder = _reminderOffsetsFromValue(event.reminder).isNotEmpty;
                                   final accent = days < 0
                                       ? const Color(0xFF9CA3AF)
                                       : days == 0
@@ -635,22 +734,22 @@ class _EventHomePageState extends State<EventHomePage> {
                                                     vertical: 4,
                                                   ),
                                                   decoration: BoxDecoration(
-                                                    color: event.reminder == 'none'
-                                                        ? const Color(0xFFE5E7EB)
-                                                        : const Color(0xFFDBEAFE),
+                                                    color: hasReminder
+                                                        ? const Color(0xFFDBEAFE)
+                                                        : const Color(0xFFE5E7EB),
                                                     borderRadius: BorderRadius.circular(999),
                                                   ),
                                                   child: Text(
-                                                    event.reminder == 'none'
-                                                        ? '🔕 No reminder'
-                                                        : '🔔 ${_reminderLabel(event)}',
+                                                    hasReminder
+                                                        ? '🔔 ${_reminderLabel(event)}'
+                                                        : '🔕 No reminder',
                                                     style: Theme.of(context)
                                                         .textTheme
                                                         .labelSmall
                                                         ?.copyWith(
-                                                          color: event.reminder == 'none'
-                                                              ? const Color(0xFF374151)
-                                                              : const Color(0xFF1D4ED8),
+                                                          color: hasReminder
+                                                              ? const Color(0xFF1D4ED8)
+                                                              : const Color(0xFF374151),
                                                           fontWeight: FontWeight.w700,
                                                         ),
                                                   ),

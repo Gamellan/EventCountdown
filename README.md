@@ -8,10 +8,10 @@ Event Countdown is a local-first Flutter app to track important dates like vacat
 - Event CRUD (create, edit, delete)
 - Countdown labels: days left, today, or days ago
 - Category support with visual markers
-- Local reminders (none, same day, or 1 day before) with configurable time
+- Local reminders with configurable time and multiple presets (7 days before, 1 day before, same day)
 - Android home screen widget for nearest event
 - Premium-inspired UI with clean cards and gradient background
-- Reminder badge on each event card
+- Reminder badge on each event card showing active reminder schedule
 
 ## Tech Stack
 
